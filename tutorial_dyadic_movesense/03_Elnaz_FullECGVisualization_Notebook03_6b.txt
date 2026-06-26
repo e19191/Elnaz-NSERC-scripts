@@ -1,0 +1,220 @@
+# ============================================================
+# by: Elnaz Ghasemi - June 2026
+# Full-recording ECG QC visualization
+# Saves both PDF and PNG
+# Saves both original y-axis and robust y-axis versions
+# Please copy and paste the following code into a new code cell in Notebook 03 (03_full_pipeline_ECG_processing.ipynb), immediately after Section 6: R-Peak Detection.
+# This code adds full-recording ECG QC visualizations so we can inspect the entire raw and cleaned ECG signal, with detected R-peaks overlaid, rather than only viewing a short 10-second window.
+# It saves both original y-axis and robust y-axis versions as PDF and PNG files in the Movesense notebook folder.
+# ============================================================
+
+import numpy as np
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+# Saves inside the folder where the notebook is running
+output_dir = Path.cwd() / "full_ecg_qc_plots"
+output_dir.mkdir(parents=True, exist_ok=True)
+
+print(f"Saving files to: {output_dir.resolve()}")
+
+
+def get_robust_ylim(signal, lower=0.5, upper=99.5, padding_fraction=0.20):
+    """
+    Use percentile-based y-limits so huge artifacts do not flatten
+    the rest of the ECG visually.
+
+    This only changes the plot display, not the actual data.
+    """
+    signal = np.asarray(signal)
+    signal = signal[np.isfinite(signal)]
+
+    if len(signal) == 0:
+        return None
+
+    ymin, ymax = np.percentile(signal, [lower, upper])
+
+    if ymin == ymax:
+        return None
+
+    padding = padding_fraction * (ymax - ymin)
+    return ymin - padding, ymax + padding
+
+
+def make_safe_filename(name):
+    """
+    Make participant name safe for file names.
+    """
+    return str(name).replace(" ", "_").replace("/", "_").replace("\\", "_")
+
+
+def plot_full_ecg_qc(
+    ecg_df,
+    cleaned_ecg,
+    rpeaks,
+    sampling_rate,
+    participant_name,
+    output_dir,
+    use_robust_ylim=False
+):
+    """
+    Plot and save the entire ECG recording for QC:
+    1. full raw ECG
+    2. full cleaned ECG
+    3. full cleaned ECG with detected R-peaks
+
+    If use_robust_ylim=False:
+        Saves the original y-axis version.
+
+    If use_robust_ylim=True:
+        Saves the robust y-axis version.
+    """
+
+    # Convert to arrays
+    raw_ecg = np.asarray(ecg_df["Sample"].values)
+    cleaned_ecg = np.asarray(cleaned_ecg)
+    rpeaks = np.asarray(rpeaks).astype(int)
+
+    # Make sure raw and cleaned ECG have the same length
+    n = min(len(raw_ecg), len(cleaned_ecg))
+    raw_ecg = raw_ecg[:n]
+    cleaned_ecg = cleaned_ecg[:n]
+
+    # Keep only valid R-peaks
+    rpeaks = rpeaks[(rpeaks >= 0) & (rpeaks < n)]
+
+    # Time axis in seconds
+    time_sec = np.arange(n) / sampling_rate
+
+    # Recording duration
+    duration_sec = n / sampling_rate
+    duration_min = duration_sec / 60
+
+    # Robust y-limits, used only if requested
+    raw_ylim = get_robust_ylim(raw_ecg)
+    clean_ylim = get_robust_ylim(cleaned_ecg)
+
+    # Label for title and filename
+    if use_robust_ylim:
+        yaxis_label = "robust y-axis"
+        file_suffix = "robust_yaxis"
+    else:
+        yaxis_label = "original y-axis"
+        file_suffix = "original_yaxis"
+
+    fig = plt.figure(figsize=(20, 8))
+
+    # --------------------------------------------------------
+    # 1. Full raw ECG
+    # --------------------------------------------------------
+    plt.subplot(3, 1, 1)
+    plt.plot(time_sec, raw_ecg, linewidth=0.4)
+    plt.title(
+        f"{participant_name}: Full raw ECG, {yaxis_label} "
+        f"({duration_sec:.1f} s / {duration_min:.1f} min)"
+    )
+    plt.xlabel("Time (s)")
+    plt.ylabel("Raw ECG")
+
+    if use_robust_ylim and raw_ylim is not None:
+        plt.ylim(raw_ylim)
+
+    # --------------------------------------------------------
+    # 2. Full cleaned ECG
+    # --------------------------------------------------------
+    plt.subplot(3, 1, 2)
+    plt.plot(time_sec, cleaned_ecg, linewidth=0.4)
+    plt.title(f"{participant_name}: Full cleaned ECG, {yaxis_label}")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Cleaned ECG")
+
+    if use_robust_ylim and clean_ylim is not None:
+        plt.ylim(clean_ylim)
+
+    # --------------------------------------------------------
+    # 3. Full cleaned ECG with R-peaks
+    # --------------------------------------------------------
+    plt.subplot(3, 1, 3)
+    plt.plot(time_sec, cleaned_ecg, linewidth=0.4)
+    plt.scatter(
+        time_sec[rpeaks],
+        cleaned_ecg[rpeaks],
+        s=8,
+        label="Detected R-peaks"
+    )
+    plt.title(f"{participant_name}: Full cleaned ECG with detected R-peaks, {yaxis_label}")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Cleaned ECG")
+    plt.legend(loc="upper right")
+
+    if use_robust_ylim and clean_ylim is not None:
+        plt.ylim(clean_ylim)
+
+    plt.tight_layout()
+
+    # Save both PDF and PNG
+    safe_name = make_safe_filename(participant_name)
+    pdf_path = output_dir / f"{safe_name}_full_ecg_qc_{file_suffix}.pdf"
+    png_path = output_dir / f"{safe_name}_full_ecg_qc_{file_suffix}.png"
+
+    fig.savefig(pdf_path, bbox_inches="tight")
+    fig.savefig(png_path, dpi=300, bbox_inches="tight")
+
+    print(f"Saved PDF: {pdf_path}")
+    print(f"Saved PNG: {png_path}")
+
+    plt.show()
+
+
+# ============================================================
+# Save Participant 1 plots
+# ============================================================
+
+# Participant 1, original y-axis
+plot_full_ecg_qc(
+    ecg_df=ecg_p1,
+    cleaned_ecg=ecg_p1_clean,
+    rpeaks=rpeaks_p1,
+    sampling_rate=metadata["sampling_rate_p1"],
+    participant_name=metadata["participant_1"],
+    output_dir=output_dir,
+    use_robust_ylim=False
+)
+
+# Participant 1, robust y-axis
+plot_full_ecg_qc(
+    ecg_df=ecg_p1,
+    cleaned_ecg=ecg_p1_clean,
+    rpeaks=rpeaks_p1,
+    sampling_rate=metadata["sampling_rate_p1"],
+    participant_name=metadata["participant_1"],
+    output_dir=output_dir,
+    use_robust_ylim=True
+)
+
+
+# ============================================================
+# Save Participant 2 plots
+# ============================================================
+
+# Participant 2, original y-axis
+plot_full_ecg_qc(
+    ecg_df=ecg_p2,
+    cleaned_ecg=ecg_p2_clean,
+    rpeaks=rpeaks_p2,
+    sampling_rate=metadata["sampling_rate_p2"],
+    participant_name=metadata["participant_2"],
+    output_dir=output_dir,
+    use_robust_ylim=False
+)
+
+# Participant 2, robust y-axis
+plot_full_ecg_qc(
+    ecg_df=ecg_p2,
+    cleaned_ecg=ecg_p2_clean,
+    rpeaks=rpeaks_p2,
+    sampling_rate=metadata["sampling_rate_p2"],
+    participant_name=metadata["participant_2"],
+    output_dir=output_dir,
+    use_robust_ylim=True
+)
